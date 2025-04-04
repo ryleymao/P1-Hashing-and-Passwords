@@ -1,4 +1,4 @@
-Project 2: Hashing and Passwords
+Project 1: Hashing and Passwords
 
 This project implements a password-cracking tool in C using SHA256 hashing. Its goal is to simulate a brute-force attack by comparing a hashed password to potential plaintext guesses. This project helps build an understanding of cryptographic hash functions, password security, and efficient search strategies when the original password is unknown.
 
