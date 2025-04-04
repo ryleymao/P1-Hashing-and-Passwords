@@ -1,133 +1,98 @@
-#include <ctype.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <openssl/sha.h>
+#include <ctype.h>
 
-// https://stackoverflow.com/questions/735126/are-there-alternate-implementations-of-gnu-getline-interface/735472#735472
-size_t getline(char **lineptr, size_t *n, FILE *stream) {
-    char *bufptr = NULL;
-    char *p = bufptr;
-    size_t size;
-    int c;
+const int SHA_LENGTH = 32;
 
-    if (lineptr == NULL) {
-        return -1;
+// Function to calculate the average of numbers provided as commandline arguments
+void calculate_average(int argc, char** argv) {
+    double sum = 0.0;
+    int i; // Declare the loop variable outside
+    for (i = 1; i < argc; i++) {
+        sum += atof(argv[i]);
     }
-    if (stream == NULL) {
-        return -1;
-    }
-    if (n == NULL) {
-        return -1;
-    }
-    bufptr = *lineptr;
-    size = *n;
-
-    c = fgetc(stream);
-    if (c == EOF) {
-        return -1;
-    }
-    if (bufptr == NULL) {
-        bufptr = malloc(128);
-        if (bufptr == NULL) {
-            return -1;
-        }
-        size = 128;
-    }
-    p = bufptr;
-    while(c != EOF) {
-        if ((p - bufptr) > (size - 1)) {
-            size = size + 128;
-            bufptr = realloc(bufptr, size);
-            if (bufptr == NULL) {
-                return -1;
-            }
-        }
-        *p++ = c;
-        if (c == '\n') {
-            break;
-        }
-        c = fgetc(stream);
-    }
-
-    *p++ = '\0';
-    *lineptr = bufptr;
-    *n = size;
-
-    return p - bufptr - 1;
+    double average = sum / (argc - 1);
+    printf("Average: %.2f\n", average);
 }
 
+// Function to convert hex characters to a byte
 uint8_t hex_to_byte(unsigned char h1, unsigned char h2) {
-    return (((h1 % 32 + 9) % 25) * 16) + ((h2 % 32 + 9) % 25);
+    return (h1 >= 'a' ? h1 - 'a' + 10 : h1 - '0') * 16 + (h2 >= 'a' ? h2 - 'a' + 10 : h2 - '0');
 }
 
-void hexstr_to_hash(unsigned char hexstr[], char hash[32]) {
-    // store current location of hexstr, to read by pairs
-    char* ptr = hexstr;
-    for (uint8_t i = 0; i < 32; i += 1) {
-        unsigned int tmp;
-        // read two characters from hexstr, format ("0x...") and save to tmp
-        sscanf(ptr, "%2x", &tmp);
-        // save to hash and move ptr
-        hash[i] = tmp;
-        ptr += 2;
+// Function to convert hex string to SHA256 hash
+void hexstr_to_hash(char hexstr[], unsigned char hash[SHA_LENGTH]) {
+    int i;  // Declare the loop variable outside
+    for (i = 0; i < 64; i += 2) {
+        hash[i / 2] = hex_to_byte(hexstr[i], hexstr[i + 1]);
     }
 }
 
-int8_t check_password(char password[], char given_hash[32]) {
-    char hash[32];
-    //assuming password is null terminated
-    SHA256(password, strlen(password), hash);
-
-    for (uint8_t i = 0; i < 32; i += 1) {
-        if (hash[i] != given_hash[i]) {
-            return 0;
-        }
-    }
-    return 1;
+// Function to check if the provided password matches the given hash
+int8_t check_password(char password[], unsigned char given_hash[SHA_LENGTH]) {
+    unsigned char hash[SHA_LENGTH];
+    SHA256((unsigned char*)password, strlen(password), hash);
+    return memcmp(hash, given_hash, SHA_LENGTH) == 0;
 }
 
-int8_t crack_password(char password[], char given_hash[]) {
-    // if the password is correct out of the gate, just return early
-    if (check_password(password, given_hash)) {
-        return 1;
-    }
+// Function to attempt cracking the password by checking case variations
+int8_t crack_password(char original_password[], unsigned char given_hash[]) {
+    size_t i;  // Loop variable for traversing the password
+    size_t length = strlen(original_password);
+    char password[256];
 
-    char tmp[] = password;
-    for (uint8_t i = 0; i < strlen(tmp); i += 1) {
-        // alternate character
-        if(islower(tmp[i])) {
-            tmp[i] = toupper(tmp[i]);
-        } else {
-            tmp[i] = tolower(tmp[i]);
+    for (i = 0; i < length; i++) {
+        // Check lowercase
+        strcpy(password, original_password);
+        password[i] = tolower(original_password[i]);
+        if (check_password(password, given_hash)) {
+            strcpy(original_password, password); // Preserve the found password
+            return 1;
         }
 
-        // check again
-        if (check_password(tmp, given_hash)) {
-            // if found, set password to tmp before returning
-            password = tmp;
+        // Check uppercase
+        strcpy(password, original_password);
+        password[i] = toupper(original_password[i]);
+        if (check_password(password, given_hash)) {
+            strcpy(original_password, password); // Preserve the found password
             return 1;
         }
     }
-
-    // if we're here, we found no match
     return 0;
 }
 
+// Main function to handle command-line arguments and password input
 int main(int argc, char** argv) {
-    char hash[32];
+    // Calculate average if more than one number is provided
+    if (argc > 2) {
+        calculate_average(argc, argv);
+    }
+
+    unsigned char hash[SHA_LENGTH];
     hexstr_to_hash(argv[1], hash);
 
-    char* password;
-    size_t size;
+    char password[256];
+    while (fgets(password, sizeof(password), stdin) != NULL) {
+        // Remove newline character if present
+        size_t len = strlen(password);
+        if (len > 0 && password[len - 1] == '\n') {
+            password[len - 1] = '\0';
+        }
 
-    while (getline(&password, &size, stdin) != -1) {
-        int8_t result = crack_password(password, hash);
-        if (result == 1) {
-            printf("Found password: SHA256(%s) = %s", password, argv[1]);
-            exit(0);
+        int i; // Declare the loop variable outside
+        if (check_password(password, hash) || crack_password(password, hash)) {
+            printf("Found password: SHA256(%s) = ", password);
+            for (i = 0; i < SHA_LENGTH; i++) {
+                printf("%02x", hash[i]);
+            }
+            printf("\n");
+            return 0;
         }
     }
-    printf("Did not find a matching password");
+
+    printf("Did not find a matching password\n");
+    return 0;
 }
